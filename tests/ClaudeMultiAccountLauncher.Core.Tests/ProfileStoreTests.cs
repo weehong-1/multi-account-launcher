@@ -66,6 +66,37 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void Entries_without_app_are_read_as_claude()
+    {
+        // Written before WhatsApp support
+        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+        File.WriteAllText(FilePath, """
+            { "version": 1, "profiles": [
+              { "name": "Personal", "slug": "personal", "createdAt": "2026-11-19T14:45:11+08:00" } ] }
+            """);
+
+        Assert.Equal(ProfileApp.Claude, Assert.Single(new ProfileStore(FilePath).Load()).App);
+    }
+
+    [Fact]
+    public void Round_trips_the_app_as_claude_or_whatsapp()
+    {
+        var store = new ProfileStore(FilePath);
+        Profile[] profiles =
+        [
+            new("Personal", "personal", DateTimeOffset.UnixEpoch),
+            new("Personal", "personal-2", DateTimeOffset.UnixEpoch, ProfileApp.WhatsApp),
+        ];
+
+        store.Save(profiles);
+
+        var json = File.ReadAllText(FilePath);
+        Assert.Contains("\"app\": \"claude\"", json);
+        Assert.Contains("\"app\": \"whatsapp\"", json);
+        Assert.Equal(profiles, store.Load());
+    }
+
+    [Fact]
     public void Corrupt_file_throws_and_is_left_alone()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);

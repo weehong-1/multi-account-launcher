@@ -14,11 +14,20 @@ public enum UninstallItemKind
 
     DesktopShortcut,
 
-    /// <summary>The launcher's own folder: profiles.json and the shortcut icon.</summary>
+    /// <summary>The launcher's own folder: profiles.json and the shortcut icons.</summary>
     LauncherData,
 
     /// <summary>Looks like a profile folder but isn't in the list (e.g. kept after Remove).</summary>
     OldProfileFolder,
+
+    /// <summary>A WhatsApp profile's WebView2 data: its WhatsApp sign-in (WhatsApp spec section 6).</summary>
+    WhatsAppData,
+
+    /// <summary>
+    /// <c>%LOCALAPPDATA%\claude-multi-account-launcher</c>, parent of the WhatsApp data folders.
+    /// Removed with whatever is left in it, except unticked old WhatsApp folders.
+    /// </summary>
+    LocalLauncherData,
 }
 
 public sealed record UninstallItem(string Path, UninstallItemKind Kind, string? ProfileName = null);
@@ -48,6 +57,12 @@ public sealed class Uninstaller(LauncherPaths paths, ShortcutService shortcuts, 
         var items = new List<UninstallItem>();
         foreach (var p in profiles)
         {
+            if (p.App == ProfileApp.WhatsApp)
+            {
+                AddIfExists(items, paths.WhatsAppDataFolder(p.Slug), UninstallItemKind.WhatsAppData, p.Name);
+                continue;
+            }
+
             AddIfExists(items, paths.DataFolder(p.Slug), UninstallItemKind.ProfileData, p.Name);
             AddIfExists(items, paths.RedirectedDataFolder(p.Slug), UninstallItemKind.ProfileData, p.Name);
             AddIfExists(items, paths.ConfigFolder(p.Slug), UninstallItemKind.ProfileConfig, p.Name);
@@ -55,6 +70,7 @@ public sealed class Uninstaller(LauncherPaths paths, ShortcutService shortcuts, 
 
         items.AddRange(shortcuts.FindAll().Select(s => new UninstallItem(s, UninstallItemKind.DesktopShortcut)));
         AddIfExists(items, paths.AppFolder, UninstallItemKind.LauncherData);
+        AddIfExists(items, paths.LocalAppFolder, UninstallItemKind.LocalLauncherData);
 
         var productCode = product.FindProductCode();
         var installedExe = Path.Combine(paths.LocalAppData, InstallerInfo.InstallFolderRelative, "claude-multi-account-launcher.exe");
@@ -68,15 +84,21 @@ public sealed class Uninstaller(LauncherPaths paths, ShortcutService shortcuts, 
     /// <summary>Deletes the plan's items (and old profile folders if asked). Returns what couldn't be deleted.</summary>
     public IReadOnlyList<string> DeleteData(UninstallPlan plan, bool includeOldProfileFolders)
     {
-        var targets = includeOldProfileFolders ? plan.Items.Concat(plan.OldProfileFolders) : plan.Items;
+        // Old folders first, so the %LOCALAPPDATA% folder that may hold them is handled last
+        var targets = includeOldProfileFolders ? plan.OldProfileFolders.Concat(plan.Items) : plan.Items;
+        var keep = includeOldProfileFolders ? [] : plan.OldProfileFolders.Select(i => Path.GetFullPath(i.Path)).ToList();
         var failed = new List<string>();
-        foreach (var item in targets)
+        foreach (var item in targets.OrderBy(i => i.Kind == UninstallItemKind.LocalLauncherData))
         {
             try
             {
                 if (item.Kind == UninstallItemKind.DesktopShortcut)
                 {
                     File.Delete(item.Path);
+                }
+                else if (item.Kind == UninstallItemKind.LocalLauncherData)
+                {
+                    DeleteExcept(item.Path, keep);
                 }
                 else if (Directory.Exists(item.Path))
                 {
@@ -140,7 +162,44 @@ public sealed class Uninstaller(LauncherPaths paths, ShortcutService shortcuts, 
         return appDir is not null && SamePath(Path.GetDirectoryName(appDir), bundleRoot) ? appDir : null;
     }
 
-    /// <summary>%APPDATA%\Claude-* and %USERPROFILE%\.claude-* not belonging to any current profile.</summary>
+    /// <summary>
+    /// Deletes <paramref name="folder"/> and everything in it except the folders in
+    /// <paramref name="keep"/> (and the folders holding them).
+    /// </summary>
+    private static void DeleteExcept(string folder, IReadOnlyList<string> keep)
+    {
+        if (!Directory.Exists(folder))
+        {
+            return;
+        }
+
+        var full = Path.GetFullPath(folder);
+        if (keep.Any(k => SamePath(k, full)))
+        {
+            return;
+        }
+
+        if (!keep.Any(k => k.StartsWith(Path.TrimEndingDirectorySeparator(full) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+        {
+            Directory.Delete(full, recursive: true);
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(full))
+        {
+            File.Delete(file);
+        }
+
+        foreach (var dir in Directory.EnumerateDirectories(full))
+        {
+            DeleteExcept(dir, keep);
+        }
+    }
+
+    /// <summary>
+    /// %APPDATA%\Claude-*, %USERPROFILE%\.claude-* and WhatsApp data folders under
+    /// %LOCALAPPDATA%\claude-multi-account-launcher\whatsapp not belonging to any current profile.
+    /// </summary>
     private List<UninstallItem> FindOldProfileFolders(IReadOnlyList<Profile> profiles)
     {
         // The launcher's own folder matches "Claude-*" too (Windows matching ignores case);
@@ -148,6 +207,12 @@ public sealed class Uninstaller(LauncherPaths paths, ShortcutService shortcuts, 
         var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(paths.AppFolder) };
         foreach (var p in profiles)
         {
+            if (p.App == ProfileApp.WhatsApp)
+            {
+                known.Add(Path.GetFullPath(paths.WhatsAppDataFolder(p.Slug)));
+                continue;
+            }
+
             known.Add(Path.GetFullPath(paths.DataFolder(p.Slug)));
             known.Add(Path.GetFullPath(paths.ConfigFolder(p.Slug)));
         }
@@ -157,6 +222,7 @@ public sealed class Uninstaller(LauncherPaths paths, ShortcutService shortcuts, 
                  {
                      (paths.AppData, "Claude-*", UninstallItemKind.OldProfileFolder),
                      (paths.UserProfile, ".claude-*", UninstallItemKind.OldProfileFolder),
+                     (paths.WhatsAppDataRoot, "*", UninstallItemKind.OldProfileFolder),
                  })
         {
             if (!Directory.Exists(root))

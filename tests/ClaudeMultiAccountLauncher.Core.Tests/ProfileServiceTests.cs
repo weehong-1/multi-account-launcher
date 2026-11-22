@@ -161,4 +161,60 @@ public sealed class ProfileServiceTests : IDisposable
         Assert.False(RunningProfiles.IsRunning(work, running, _paths));
         Assert.False(RunningProfiles.IsRunning(null, [new RunningInstance(2, "C:\\x")], _paths));
     }
+
+    [Fact]
+    public void Add_whatsapp_creates_only_its_webview2_folder()
+    {
+        var profile = NewService().Add("Resetrix", ProfileApp.WhatsApp);
+
+        Assert.Equal(ProfileApp.WhatsApp, profile.App);
+        Assert.Equal(
+            Path.Combine(_root, "Local", "claude-multi-account-launcher", "whatsapp", "resetrix"),
+            _paths.WhatsAppDataFolder("resetrix"));
+        Assert.True(Directory.Exists(_paths.WhatsAppDataFolder("resetrix")));
+        Assert.False(Directory.Exists(_paths.DataFolder("resetrix")));
+        Assert.False(Directory.Exists(_paths.ConfigFolder("resetrix")));
+        Assert.Equal(profile, Assert.Single(_store.Load()));
+    }
+
+    [Fact]
+    public void Slugs_are_shared_across_apps()
+    {
+        var service = NewService();
+        var claude = service.Add("Personal");
+        var whatsApp = service.Add("Personal", ProfileApp.WhatsApp);
+
+        Assert.Equal("personal", claude.Slug);
+        Assert.Equal("personal-2", whatsApp.Slug);
+    }
+
+    [Fact]
+    public void Names_are_unique_per_app()
+    {
+        var service = NewService();
+        service.Add("Personal");
+        var whatsApp = service.Add("Personal", ProfileApp.WhatsApp);
+
+        Assert.NotNull(service.ValidateName("personal"));
+        Assert.NotNull(service.ValidateName("PERSONAL", app: ProfileApp.WhatsApp));
+        Assert.NotNull(service.ValidateName("Default", app: ProfileApp.WhatsApp));
+        Assert.Null(service.ValidateName("Work", app: ProfileApp.WhatsApp));
+
+        // Renaming checks the profile's own app: the Claude "Personal" doesn't block it
+        Assert.Null(service.ValidateName("Personal", whatsApp.Slug));
+    }
+
+    [Fact]
+    public void Remove_whatsapp_with_delete_removes_its_folder()
+    {
+        var service = NewService();
+        var profile = service.Add("Resetrix", ProfileApp.WhatsApp);
+        Assert.Equal([_paths.WhatsAppDataFolder(profile.Slug)], service.ExistingFolders(profile.Slug));
+
+        var result = service.Remove(profile.Slug, deleteFolders: true);
+
+        Assert.Empty(result.FailedFolders);
+        Assert.False(Directory.Exists(_paths.WhatsAppDataFolder(profile.Slug)));
+        Assert.Empty(service.Profiles);
+    }
 }

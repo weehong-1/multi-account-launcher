@@ -33,6 +33,10 @@ public class SlugGeneratorTests
         Assert.Equal("default-2", SlugGenerator.Create("Default", []));
 
     [Fact]
+    public void Whatsapp_default_is_reserved_for_the_official_app() =>
+        Assert.Equal("whatsapp-default-2", SlugGenerator.Create("WhatsApp Default", []));
+
+    [Fact]
     public void Long_names_are_capped_and_suffix_still_fits()
     {
         var name = new string('x', 100);

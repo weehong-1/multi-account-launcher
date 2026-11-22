@@ -1,12 +1,22 @@
 namespace ClaudeMultiAccountLauncher.Core.Startup;
 
-/// <summary>Parsed launcher command line. Only <c>--launch &lt;slug&gt;</c> exists (FR-8).</summary>
-public sealed record StartupCommand(string? LaunchSlug, string? Error)
+/// <summary>
+/// Parsed launcher command line:
+/// <c>--launch &lt;slug&gt;</c> opens any profile from a desktop shortcut (FR-8);
+/// <c>--whatsapp &lt;slug&gt;</c> makes this process the window of one WhatsApp profile
+/// (WhatsApp spec section 2). The first of the two on the command line wins.
+/// </summary>
+public sealed record StartupCommand(string? LaunchSlug, string? Error, string? WhatsAppSlug = null)
 {
     public const string LaunchSwitch = "--launch";
 
-    /// <summary>Slug that targets the built-in Default profile; reserved by the slug generator.</summary>
+    public const string WhatsAppSwitch = "--whatsapp";
+
+    /// <summary>Slug that targets the built-in Claude Default profile; reserved by the slug generator.</summary>
     public const string DefaultSlug = "default";
+
+    /// <summary>Slug that targets the built-in WhatsApp Default (the official app); reserved too.</summary>
+    public const string WhatsAppDefaultSlug = "whatsapp-default";
 
     public static StartupCommand None { get; } = new(null, null);
 
@@ -15,25 +25,33 @@ public sealed record StartupCommand(string? LaunchSlug, string? Error)
     {
         for (var i = 0; i < args.Count; i++)
         {
-            var arg = args[i];
-            if (arg.StartsWith(LaunchSwitch + "=", StringComparison.OrdinalIgnoreCase))
+            foreach (var name in (ReadOnlySpan<string>)[LaunchSwitch, WhatsAppSwitch])
             {
-                return FromSlug(arg[(LaunchSwitch.Length + 1)..]);
-            }
+                var arg = args[i];
+                string? value;
+                if (arg.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = arg[(name.Length + 1)..];
+                }
+                else if (string.Equals(arg, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = i + 1 < args.Count ? args[i + 1] : null;
+                }
+                else
+                {
+                    continue;
+                }
 
-            if (string.Equals(arg, LaunchSwitch, StringComparison.OrdinalIgnoreCase))
-            {
-                return i + 1 < args.Count
-                    ? FromSlug(args[i + 1])
-                    : new StartupCommand(null, "--launch needs a profile, e.g. --launch personal");
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    return new StartupCommand(null, $"{name} needs a profile, e.g. {name} personal");
+                }
+
+                var slug = value.Trim().ToLowerInvariant();
+                return name == LaunchSwitch ? new StartupCommand(slug, null) : new StartupCommand(null, null, slug);
             }
         }
 
         return None;
     }
-
-    private static StartupCommand FromSlug(string slug) =>
-        string.IsNullOrWhiteSpace(slug)
-            ? new StartupCommand(null, "--launch needs a profile, e.g. --launch personal")
-            : new StartupCommand(slug.Trim().ToLowerInvariant(), null);
 }

@@ -5,6 +5,7 @@ using ClaudeMultiAccountLauncher.Core.Profiles;
 using ClaudeMultiAccountLauncher.Core.Shortcuts;
 using ClaudeMultiAccountLauncher.Core.Startup;
 using ClaudeMultiAccountLauncher.Core.Uninstall;
+using ClaudeMultiAccountLauncher.Core.WhatsApp;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Graphics;
@@ -19,8 +20,18 @@ public sealed partial class MainWindow : Window
     private readonly LauncherPaths _paths = LauncherPaths.ForCurrentUser();
     private readonly ProfileService _profiles;
     private readonly ClaudeLauncher _launcher;
+    private readonly WhatsAppLauncher _whatsApp;
     private readonly ProcessScanner _scanner = new(new WmiProcessSource());
-    private readonly ObservableCollection<ProfileRow> _rows = [];
+
+    // WhatsApp spec section 3: two sections, Claude and WhatsApp, each with its Default first
+    private readonly ObservableCollection<ProfileRow> _claudeRows = [];
+    private readonly ObservableCollection<ProfileRow> _whatsAppRows = [];
+
+    /// <summary>This exe's file name; WhatsApp profiles run as processes of it (WhatsApp spec section 2).</summary>
+    private readonly string _launcherImageName = Path.GetFileName(Environment.ProcessPath ?? "claude-multi-account-launcher.exe");
+
+    private RunningState _running = RunningState.Empty;
+    private bool _whatsAppChecked;
 
     private readonly ShortcutService _shortcuts = new(
         Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
@@ -42,8 +53,10 @@ public sealed partial class MainWindow : Window
 
         _profiles = new ProfileService(new ProfileStore(_paths.ProfilesFile), _paths);
         _launcher = new ClaudeLauncher(_paths);
+        _whatsApp = new WhatsAppLauncher(_paths, Environment.ProcessPath ?? string.Empty);
         _pendingStartup = startup;
-        ProfileList.ItemsSource = _rows;
+        ClaudeList.ItemsSource = _claudeRows;
+        WhatsAppList.ItemsSource = _whatsAppRows;
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -130,8 +143,22 @@ public sealed partial class MainWindow : Window
         }
 
         AddButton.IsEnabled = _storeError is null;
-        SyncRows([]);
+        SyncRows();
     }
+
+    /// <summary>What runs right now, from the last refresh.</summary>
+    /// <param name="WhatsApp">The official WhatsApp Desktop, or null when it isn't installed.</param>
+    /// <param name="WhatsAppProfiles">Running WhatsApp profiles, slug to process id.</param>
+    private sealed record RunningState(
+        IReadOnlyList<RunningInstance> Claude,
+        WhatsAppDesktop? WhatsApp,
+        bool WhatsAppDefaultRunning,
+        IReadOnlyDictionary<string, int> WhatsAppProfiles)
+    {
+        public static RunningState Empty { get; } = new([], null, false, new Dictionary<string, int>());
+    }
+
+    private IEnumerable<ProfileRow> AllRows => _claudeRows.Concat(_whatsAppRows);
 
     private async Task RefreshAsync()
     {
@@ -152,21 +179,33 @@ public sealed partial class MainWindow : Window
                 // Package lookup and WMI are slow-ish; keep them off the UI thread.
                 var (install, error, running) = await Task.Run(() =>
                 {
+                    ClaudeInstall? found = null;
+                    string? notFound = null;
+                    IReadOnlyList<RunningInstance> claude = [];
                     try
                     {
-                        var found = new ClaudeLocator(_paths, new SystemInstallProbe()).Locate();
-                        return (found, (string?)null, _scanner.RunningInstances(found));
+                        found = new ClaudeLocator(_paths, new SystemInstallProbe()).Locate();
+                        claude = _scanner.RunningInstances(found);
                     }
                     catch (ClaudeNotFoundException ex)
                     {
-                        return ((ClaudeInstall?)null, ex.Message, (IReadOnlyList<RunningInstance>)[]);
+                        notFound = ex.Message;
                     }
+
+                    var whatsApp = new WhatsAppLocator(new SystemWhatsAppProbe()).Locate();
+                    return (found, notFound, new RunningState(
+                        claude,
+                        whatsApp,
+                        whatsApp is not null && _scanner.IsWhatsAppDefaultRunning(new SystemWindowProbe()),
+                        _scanner.RunningWhatsAppProfiles(_launcherImageName)));
                 });
 
                 _install = install;
                 _installError = error;
-                SyncRows(running);
-                _exitWatcher.Watch(running.Select(r => r.ProcessId));
+                _running = running;
+                _whatsAppChecked = true;
+                SyncRows();
+                _exitWatcher.Watch(running.Claude.Select(r => r.ProcessId).Concat(running.WhatsAppProfiles.Values));
             }
             while (_refreshAgain);
         }
@@ -176,51 +215,88 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Updates rows in place so focus and open menus survive a refresh.</summary>
-    private void SyncRows(IReadOnlyList<RunningInstance> running)
+    /// <summary>Updates both sections from the profile list and <see cref="_running"/>.</summary>
+    private void SyncRows()
     {
-        var wanted = new List<Profile?> { null };
-        wanted.AddRange(_profiles.Profiles);
+        var running = _running;
+
+        var claude = new List<Profile?> { null };
+        claude.AddRange(_profiles.Profiles.Where(p => p.App == ProfileApp.Claude));
+        SyncSection(_claudeRows, claude, ProfileApp.Claude,
+            p => p is null ? "Claude's own data folder" : _paths.DataFolder(p.Slug),
+            row =>
+            {
+                row.IsRunning = RunningProfiles.IsRunning(row.Profile, running.Claude, _paths);
+                row.CanLaunch = _install is not null;
+            });
+
+        // The WhatsApp Default is listed only when WhatsApp Desktop is installed (WhatsApp spec section 2)
+        var whatsApp = new List<Profile?>();
+        if (running.WhatsApp is not null)
+        {
+            whatsApp.Add(null);
+        }
+
+        whatsApp.AddRange(_profiles.Profiles.Where(p => p.App == ProfileApp.WhatsApp));
+        SyncSection(_whatsAppRows, whatsApp, ProfileApp.WhatsApp,
+            p => p is null ? "WhatsApp's own data folder" : _paths.WhatsAppDataFolder(p.Slug),
+            row =>
+            {
+                row.IsRunning = row.Profile is null ? running.WhatsAppDefaultRunning : running.WhatsAppProfiles.ContainsKey(row.Key);
+                row.CanLaunch = true;
+            });
+        WhatsAppEmptyText.Visibility = _whatsAppChecked && _whatsAppRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        ShowErrors();
+        FooterText.Text = _install is null
+            ? string.Empty
+            : $"Claude Desktop ({_install.Kind}): {_install.LaunchPath}";
+    }
+
+    /// <summary>Updates one section's rows in place so focus and open menus survive a refresh.</summary>
+    private static void SyncSection(
+        ObservableCollection<ProfileRow> rows,
+        List<Profile?> wanted,
+        ProfileApp app,
+        Func<Profile?, string> folderText,
+        Action<ProfileRow> update)
+    {
+        static string KeyOf(Profile? p, ProfileApp app) =>
+            p?.Slug ?? (app == ProfileApp.WhatsApp ? StartupCommand.WhatsAppDefaultSlug : StartupCommand.DefaultSlug);
 
         // Drop rows whose profile is gone
-        for (var i = _rows.Count - 1; i >= 0; i--)
+        for (var i = rows.Count - 1; i >= 0; i--)
         {
-            if (!wanted.Any(p => (p?.Slug ?? string.Empty) == _rows[i].Key))
+            if (!wanted.Any(p => KeyOf(p, app) == rows[i].Key))
             {
-                _rows.RemoveAt(i);
+                rows.RemoveAt(i);
             }
         }
 
         for (var i = 0; i < wanted.Count; i++)
         {
             var profile = wanted[i];
-            var key = profile?.Slug ?? string.Empty;
-            var row = _rows.FirstOrDefault(r => r.Key == key);
+            var key = KeyOf(profile, app);
+            var row = rows.FirstOrDefault(r => r.Key == key);
 
             if (row is null)
             {
-                row = new ProfileRow(profile, profile is null ? "Claude's own data folder" : _paths.DataFolder(profile.Slug));
-                _rows.Insert(i, row);
+                row = new ProfileRow(profile, app, folderText(profile));
+                rows.Insert(i, row);
             }
             else
             {
-                var at = _rows.IndexOf(row);
+                var at = rows.IndexOf(row);
                 if (at != i)
                 {
-                    _rows.Move(at, i);
+                    rows.Move(at, i);
                 }
 
                 row.Profile = profile;
             }
 
-            row.IsRunning = RunningProfiles.IsRunning(profile, running, _paths);
-            row.CanLaunch = _install is not null;
+            update(row);
         }
-
-        ShowErrors();
-        FooterText.Text = _install is null
-            ? string.Empty
-            : $"Claude Desktop ({_install.Kind}): {_install.LaunchPath}";
     }
 
     private void ShowErrors(string? actionError = null)
@@ -234,7 +310,23 @@ public sealed partial class MainWindow : Window
 
     private async void LaunchButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is not ProfileRow row || _install is null)
+        if ((sender as FrameworkElement)?.Tag is not ProfileRow row)
+        {
+            return;
+        }
+
+        // WhatsApp: the official app, or the profile's own window; a running one comes to the front (FR-W6)
+        if (row.IsWhatsApp)
+        {
+            if (StartWhatsApp(row.Profile))
+            {
+                await RefreshSoonAsync();
+            }
+
+            return;
+        }
+
+        if (_install is null)
         {
             return;
         }
@@ -260,7 +352,55 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Claude takes a moment to start; refresh so Running shows without refocusing.</summary>
+    /// <param name="profile">Null starts the official WhatsApp Desktop (the WhatsApp Default).</param>
+    private bool StartWhatsApp(Profile? profile)
+    {
+        try
+        {
+            if (profile is null)
+            {
+                _whatsApp.LaunchDefault();
+            }
+            else
+            {
+                using var _ = _whatsApp.LaunchProfile(profile);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            ShowErrors($"Couldn't start WhatsApp: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// FR-W4: Quit in a running WhatsApp profile's menu. Closes its window the way its X button
+    /// does, so WebView2 can finish writing the profile's data.
+    /// </summary>
+    private async void QuitMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ProfileRow { Profile: { } profile }
+            || !_running.WhatsAppProfiles.TryGetValue(profile.Slug, out var processId))
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            process.CloseMainWindow();
+        }
+        catch (ArgumentException)
+        {
+            // Already gone
+        }
+
+        await RefreshSoonAsync();
+    }
+
+    /// <summary>Apps take a moment to start or quit; refresh so Running shows without refocusing.</summary>
     private async Task RefreshSoonAsync()
     {
         await Task.Delay(TimeSpan.FromSeconds(3));
@@ -306,8 +446,7 @@ public sealed partial class MainWindow : Window
 
     private async void AddButton_Click(object sender, RoutedEventArgs e)
     {
-        var name = await AskForName("Add profile", "Add", initial: string.Empty, renamingSlug: null);
-        if (name is null)
+        if (await AskForName("Add profile", "Add", initial: string.Empty, renamingSlug: null) is not var (name, app))
         {
             return;
         }
@@ -315,7 +454,7 @@ public sealed partial class MainWindow : Window
         Profile added;
         try
         {
-            added = _profiles.Add(name);
+            added = _profiles.Add(name, app);
         }
         catch (Exception ex) when (ex is ProfileValidationException or IOException or UnauthorizedAccessException)
         {
@@ -324,7 +463,28 @@ public sealed partial class MainWindow : Window
         }
 
         await RefreshAsync();
-        await OfferFirstSignInAsync(added);
+        if (app == ProfileApp.WhatsApp)
+        {
+            await OfferWhatsAppSignInAsync(added);
+        }
+        else
+        {
+            await OfferFirstSignInAsync(added);
+        }
+    }
+
+    /// <summary>FR-W1: right after adding a WhatsApp profile, offer to open it for the QR sign-in.</summary>
+    private async Task OfferWhatsAppSignInAsync(Profile profile)
+    {
+        var open = await NewDialog(
+            $"Sign in to \"{profile.Name}\"",
+            "WhatsApp opens in its own window. Scan the QR code there with WhatsApp on your phone (Linked devices > Link a device).",
+            primary: "Open WhatsApp",
+            close: "Later").ShowAsync();
+        if (open == ContentDialogResult.Primary && StartWhatsApp(profile))
+        {
+            await RefreshSoonAsync();
+        }
     }
 
     // ---------- Rename and remove (FR-5) ----------
@@ -336,8 +496,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var name = await AskForName($"Rename \"{profile.Name}\"", "Rename", profile.Name, profile.Slug);
-        if (name is null || name.Trim() == profile.Name)
+        if (await AskForName($"Rename \"{profile.Name}\"", "Rename", profile.Name, profile.Slug) is not var (name, _)
+            || name == profile.Name)
         {
             return;
         }
@@ -356,7 +516,7 @@ public sealed partial class MainWindow : Window
         await RefreshAsync();
 
         // Keep the desktop shortcut's name in step with the profile.
-        var shortcutError = TryShortcut(() => _shortcuts.Rename(renamed.Slug, renamed.Name, ClaudeIcon.Ensure(_paths, _install)));
+        var shortcutError = TryShortcut(() => _shortcuts.Rename(renamed.Slug, renamed.Name, IconFor(renamed.App), renamed.App));
         if (shortcutError is not null)
         {
             ShowErrors($"Renamed the profile, but couldn't update its desktop shortcut: {shortcutError}");
@@ -390,7 +550,11 @@ public sealed partial class MainWindow : Window
         {
             var folderDialog = NewDialog(
                 "Also delete its folders?",
-                MonoList("This deletes the account's sign-in, chats, settings and Claude Code config on this PC:", folders),
+                MonoList(
+                    profile.App == ProfileApp.WhatsApp
+                        ? "This deletes the WhatsApp sign-in and everything WhatsApp Web stored on this PC:"
+                        : "This deletes the account's sign-in, chats, settings and Claude Code config on this PC:",
+                    folders),
                 primary: "Keep folders",
                 close: null,
                 secondary: "Delete folders");
@@ -434,17 +598,23 @@ public sealed partial class MainWindow : Window
     private async void UninstallMenu_Click(object sender, RoutedEventArgs e)
     {
         // Deleting a profile's folders while its Claude is open would fail or corrupt it.
+        // The user closes Claude profiles; WhatsApp profiles the launcher quits itself (WhatsApp spec, decision 3.12).
         await RefreshAsync();
-        var running = _rows.Where(r => r.IsCustom && r.IsRunning).Select(r => r.Name).ToList();
-        if (running.Count > 0)
+        var runningClaude = _claudeRows.Where(r => r.IsCustom && r.IsRunning).Select(r => r.Name).ToList();
+        if (runningClaude.Count > 0)
         {
             await NewDialog(
                 "Close these Claude windows first",
-                MonoList("These profiles are still running. Close their Claude windows (or quit Claude from the tray), then try again:", running),
+                MonoList("These profiles are still running. Close their Claude windows (or quit Claude from the tray), then try again:", runningClaude),
                 primary: "OK",
                 close: null).ShowAsync();
             return;
         }
+
+        var runningWhatsApp = _whatsAppRows
+            .Where(r => r is { IsWhatsAppProfile: true, IsRunning: true } && _running.WhatsAppProfiles.ContainsKey(r.Key))
+            .Select(r => (r.Name, ProcessId: _running.WhatsAppProfiles[r.Key]))
+            .ToList();
 
         var uninstaller = new Uninstaller(_paths, _shortcuts, new MsiInstalledProduct());
         var plan = await Task.Run(() => uninstaller.Plan(_profiles.Profiles, Environment.ProcessPath, AppContext.BaseDirectory));
@@ -452,7 +622,7 @@ public sealed partial class MainWindow : Window
         var oldFolders = new CheckBox { Content = "Also delete these folders that look like old profiles:" };
         var dialog = NewDialog(
             "Uninstall and remove everything?",
-            new ScrollViewer { MaxHeight = 420, Content = UninstallSummary(plan, oldFolders) },
+            new ScrollViewer { MaxHeight = 420, Content = UninstallSummary(plan, oldFolders, runningWhatsApp.Select(r => r.Name)) },
             primary: "Remove everything",
             close: "Cancel");
         dialog.DefaultButton = ContentDialogButton.Close; // Enter must not delete accounts
@@ -462,7 +632,13 @@ public sealed partial class MainWindow : Window
         }
 
         _poll.Stop();
-        var failed = uninstaller.DeleteData(plan, oldFolders.IsChecked == true);
+        var notQuit = await Task.Run(() => QuitAndWait(runningWhatsApp.Select(r => r.ProcessId)));
+        var failed = uninstaller.DeleteData(plan, oldFolders.IsChecked == true).ToList();
+        if (notQuit)
+        {
+            failed.Add("(A WhatsApp profile didn't close in time, so its folder may be left behind.)");
+        }
+
         if (failed.Count > 0)
         {
             await NewDialog(
@@ -497,14 +673,46 @@ public sealed partial class MainWindow : Window
         Application.Current.Exit();
     }
 
-    private StackPanel UninstallSummary(UninstallPlan plan, CheckBox oldFolders)
+    /// <summary>
+    /// Closes WhatsApp profile windows the way their X button does, waits for them to exit, and
+    /// ends any that don't within 10 seconds. True if one was still running afterwards.
+    /// </summary>
+    private static bool QuitAndWait(IEnumerable<int> processIds)
+    {
+        var stuck = false;
+        foreach (var id in processIds)
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(id);
+                process.CloseMainWindow();
+                if (!process.WaitForExit(TimeSpan.FromSeconds(10)))
+                {
+                    process.Kill(entireProcessTree: true);
+                    stuck |= !process.WaitForExit(TimeSpan.FromSeconds(5));
+                }
+            }
+            catch (ArgumentException)
+            {
+                // Already gone
+            }
+            catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+            {
+                stuck = true;
+            }
+        }
+
+        return stuck;
+    }
+
+    private StackPanel UninstallSummary(UninstallPlan plan, CheckBox oldFolders, IEnumerable<string> runningWhatsApp)
     {
         var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(new TextBlock
         {
             Text = "This removes Claude Multi-Account Launcher and everything it created on this PC. "
                 + "The profiles' sign-ins, chats and Claude Code settings are deleted and can't be recovered. "
-                + "Your Default Claude and its data are not touched.",
+                + "Your Default Claude, the official WhatsApp Desktop and their data are not touched.",
             TextWrapping = TextWrapping.Wrap,
         });
 
@@ -520,8 +728,14 @@ public sealed partial class MainWindow : Window
         Section("Profiles' Claude data and Claude Code settings:", plan.Items
             .Where(i => i.Kind is UninstallItemKind.ProfileData or UninstallItemKind.ProfileConfig)
             .Select(i => $"{i.ProfileName}: {i.Path}"));
+        Section("These WhatsApp profiles are open; the launcher quits them first:", runningWhatsApp);
+        Section("WhatsApp profiles' data (their WhatsApp sign-ins on this PC):", plan.Items
+            .Where(i => i.Kind == UninstallItemKind.WhatsAppData)
+            .Select(i => $"{i.ProfileName}: {i.Path}"));
         Section("Desktop shortcuts:", plan.Items.Where(i => i.Kind == UninstallItemKind.DesktopShortcut).Select(i => i.Path));
-        Section("Launcher settings:", plan.Items.Where(i => i.Kind == UninstallItemKind.LauncherData).Select(i => i.Path));
+        Section("Launcher settings:", plan.Items
+            .Where(i => i.Kind is UninstallItemKind.LauncherData or UninstallItemKind.LocalLauncherData)
+            .Select(i => i.Path));
 
         var afterExit = new List<string>();
         if (plan.ProductCode is not null)
@@ -559,10 +773,10 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var slug = row.Profile?.Slug ?? StartupCommand.DefaultSlug;
-        var icon = ClaudeIcon.Ensure(_paths, _install);
+        var slug = row.Key;
+        var icon = IconFor(row.App);
         string? path = null;
-        var error = TryShortcut(() => path = _shortcuts.Create(row.Name, slug, icon));
+        var error = TryShortcut(() => path = _shortcuts.Create(row.Name, slug, icon, row.App));
 
         if (error is not null)
         {
@@ -570,10 +784,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var appName = row.IsWhatsApp ? "WhatsApp's" : "Claude's";
         ShowNotice(icon is null
-            ? $"Created \"{Path.GetFileName(path)}\" on your desktop. Claude's icon couldn't be copied, so it uses the launcher's icon."
+            ? $"Created \"{Path.GetFileName(path)}\" on your desktop. {appName} icon couldn't be copied, so it uses the launcher's icon."
             : $"Created \"{Path.GetFileName(path)}\" on your desktop.");
     }
+
+    /// <summary>The app's stable icon for shortcuts, or null for the launcher's own (FR-8, WhatsApp spec section 4).</summary>
+    private string? IconFor(ProfileApp app) => app == ProfileApp.WhatsApp
+        ? WhatsAppIcon.Ensure(_paths, _running.WhatsApp)
+        : ClaudeIcon.Ensure(_paths, _install);
 
     /// <summary>Runs a shortcut operation; returns an error message or null.</summary>
     private static string? TryShortcut(Action action)
@@ -601,9 +821,23 @@ public sealed partial class MainWindow : Window
 
     // ---------- Dialog helpers ----------
 
-    /// <summary>Name prompt with live validation and a preview of the folders it will use.</summary>
-    private async Task<string?> AskForName(string title, string primary, string initial, string? renamingSlug)
+    /// <summary>
+    /// Name prompt with live validation and a preview of the folders it will use. Adding also picks
+    /// the app (WhatsApp spec section 3); renaming keeps the profile's own.
+    /// </summary>
+    private async Task<(string Name, ProfileApp App)?> AskForName(string title, string primary, string initial, string? renamingSlug)
     {
+        var renamingApp = renamingSlug is null ? (ProfileApp?)null : _profiles.Find(renamingSlug)?.App ?? ProfileApp.Claude;
+        var appPicker = new RadioButtons
+        {
+            Header = "App",
+            MaxColumns = 2,
+            Items = { "Claude", "WhatsApp" },
+            SelectedIndex = 0,
+            Visibility = renamingApp is null ? Visibility.Visible : Visibility.Collapsed,
+        };
+        ProfileApp App() => renamingApp ?? (appPicker.SelectedIndex == 1 ? ProfileApp.WhatsApp : ProfileApp.Claude);
+
         var box = new TextBox { Header = "Display name", PlaceholderText = "e.g. Personal", Text = initial };
         var error = new TextBlock
         {
@@ -619,24 +853,31 @@ public sealed partial class MainWindow : Window
             IsTextSelectionEnabled = true,
         };
 
-        var dialog = NewDialog(title, new StackPanel { Spacing = 8, Children = { box, error, preview } }, primary, "Cancel");
+        var dialog = NewDialog(title, new StackPanel { Spacing = 8, Children = { appPicker, box, error, preview } }, primary, "Cancel");
 
         void Validate()
         {
-            var message = _profiles.ValidateName(box.Text, renamingSlug);
+            var app = App();
+            var message = _profiles.ValidateName(box.Text, renamingSlug, app);
             error.Text = box.Text.Length == 0 ? string.Empty : message ?? string.Empty;
             error.Visibility = string.IsNullOrEmpty(error.Text) ? Visibility.Collapsed : Visibility.Visible;
             dialog.IsPrimaryButtonEnabled = message is null;
 
             var slug = renamingSlug ?? _profiles.PreviewSlug(box.Text);
+            var folders = app == ProfileApp.WhatsApp
+                ? [_paths.WhatsAppDataFolder(slug)]
+                : renamingSlug is not null
+                    ? [_paths.DataFolder(slug)]
+                    : new[] { _paths.DataFolder(slug), _paths.ConfigFolder(slug) };
             preview.Text = renamingSlug is not null
-                ? "Folders stay the same:" + Environment.NewLine + _paths.DataFolder(slug)
+                ? "Folders stay the same:" + Environment.NewLine + string.Join(Environment.NewLine, folders)
                 : message is null
-                    ? "Creates:" + Environment.NewLine + _paths.DataFolder(slug) + Environment.NewLine + _paths.ConfigFolder(slug)
+                    ? "Creates:" + Environment.NewLine + string.Join(Environment.NewLine, folders)
                     : string.Empty;
         }
 
         box.TextChanged += (_, _) => Validate();
+        appPicker.SelectionChanged += (_, _) => Validate();
         dialog.Opened += (_, _) =>
         {
             box.Focus(FocusState.Programmatic);
@@ -644,7 +885,7 @@ public sealed partial class MainWindow : Window
         };
         Validate();
 
-        return await dialog.ShowAsync() == ContentDialogResult.Primary ? box.Text.Trim() : null;
+        return await dialog.ShowAsync() == ContentDialogResult.Primary ? (box.Text.Trim(), App()) : null;
     }
 
     private ContentDialog NewDialog(string title, object content, string primary, string? close, string? secondary = null)

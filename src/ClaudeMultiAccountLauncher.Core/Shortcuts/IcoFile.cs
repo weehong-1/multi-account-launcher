@@ -52,4 +52,47 @@ public static class IcoFile
 
         return output;
     }
+
+    private static ReadOnlySpan<byte> PngSignature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    /// <summary>
+    /// Builds a .ico whose images are PNG files, stored as they are (supported since Windows
+    /// Vista). Used for Store apps such as WhatsApp, whose icons are PNGs, not exe resources.
+    /// </summary>
+    public static byte[] FromPngs(IReadOnlyList<byte[]> pngs)
+    {
+        if (pngs.Count == 0)
+        {
+            throw new InvalidDataException("No images for the icon.");
+        }
+
+        var offset = HeaderSize + (FileEntrySize * pngs.Count);
+        var output = new byte[offset + pngs.Sum(p => p.Length)];
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(2), 1); // type: icon
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(4), (ushort)pngs.Count);
+
+        for (var i = 0; i < pngs.Count; i++)
+        {
+            var png = pngs[i];
+            if (png.Length < 24 || !png.AsSpan(0, 8).SequenceEqual(PngSignature))
+            {
+                throw new InvalidDataException("Not a PNG image.");
+            }
+
+            // IHDR width and height, big-endian; 256 is written as 0
+            var width = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16));
+            var height = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20));
+            var entry = output.AsSpan(HeaderSize + (FileEntrySize * i), FileEntrySize);
+            entry[0] = width >= 256 ? (byte)0 : (byte)width;
+            entry[1] = height >= 256 ? (byte)0 : (byte)height;
+            BinaryPrimitives.WriteUInt16LittleEndian(entry[4..], 1); // planes
+            BinaryPrimitives.WriteUInt16LittleEndian(entry[6..], 32); // bits per pixel
+            BinaryPrimitives.WriteUInt32LittleEndian(entry[8..], (uint)png.Length);
+            BinaryPrimitives.WriteUInt32LittleEndian(entry[12..], (uint)offset);
+            png.CopyTo(output, offset);
+            offset += png.Length;
+        }
+
+        return output;
+    }
 }

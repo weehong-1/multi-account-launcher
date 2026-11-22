@@ -1,3 +1,4 @@
+using ClaudeMultiAccountLauncher.Core.Profiles;
 using ClaudeMultiAccountLauncher.Core.Startup;
 
 namespace ClaudeMultiAccountLauncher.Core.Shortcuts;
@@ -9,17 +10,25 @@ public sealed class ShortcutConflictException(string path)
 }
 
 /// <summary>
-/// Desktop shortcuts named "Claude - &lt;name&gt;" that run <c>launcher --launch &lt;slug&gt;</c> (FR-8).
-/// A shortcut is ours when it targets an exe with the launcher's file name; it belongs to a
-/// profile when its arguments are that profile's <c>--launch</c> line.
+/// Desktop shortcuts that run <c>launcher --launch &lt;slug&gt;</c>: "Claude - &lt;name&gt;" (FR-8) and
+/// "WhatsApp - &lt;name&gt;" (WhatsApp spec section 4). A shortcut is ours when it targets an exe with
+/// the launcher's file name; it belongs to a profile when its arguments are that profile's
+/// <c>--launch</c> line. Slugs are shared across apps, so the arguments alone identify it.
 /// </summary>
 public sealed class ShortcutService(string desktopFolder, string launcherExePath)
 {
     public const string NamePrefix = "Claude - ";
 
+    public const string WhatsAppNamePrefix = "WhatsApp - ";
+
+    private static readonly string[] Prefixes = [NamePrefix, WhatsAppNamePrefix];
+
     public string DesktopFolder { get; } = desktopFolder;
 
-    public string PathFor(string displayName) => Path.Combine(DesktopFolder, NamePrefix + displayName + ".lnk");
+    public static string PrefixFor(ProfileApp app) => app == ProfileApp.WhatsApp ? WhatsAppNamePrefix : NamePrefix;
+
+    public string PathFor(string displayName, ProfileApp app = ProfileApp.Claude) =>
+        Path.Combine(DesktopFolder, PrefixFor(app) + displayName + ".lnk");
 
     public static string ArgumentsFor(string slug) => $"{StartupCommand.LaunchSwitch} {slug}";
 
@@ -31,8 +40,8 @@ public sealed class ShortcutService(string desktopFolder, string launcherExePath
     }
 
     /// <summary>
-    /// Every "Claude - *" shortcut this launcher made, including ones for profiles removed
-    /// since. Used by the full uninstall.
+    /// Every "Claude - *" and "WhatsApp - *" shortcut this launcher made, including ones for
+    /// profiles removed since. Used by the full uninstall.
     /// </summary>
     public IReadOnlyList<string> FindAll() => Ours().Select(s => s.Path).ToList();
 
@@ -43,7 +52,7 @@ public sealed class ShortcutService(string desktopFolder, string launcherExePath
             yield break;
         }
 
-        foreach (var lnk in Directory.EnumerateFiles(DesktopFolder, NamePrefix + "*.lnk"))
+        foreach (var lnk in Prefixes.SelectMany(prefix => Directory.EnumerateFiles(DesktopFolder, prefix + "*.lnk")))
         {
             var info = TryRead(lnk);
             if (info is not null && IsOurs(info) && info.Arguments.TrimStart().StartsWith(StartupCommand.LaunchSwitch, StringComparison.OrdinalIgnoreCase))
@@ -58,9 +67,9 @@ public sealed class ShortcutService(string desktopFolder, string launcherExePath
     /// different name is removed, so renaming a profile and recreating doesn't leave two.
     /// </summary>
     /// <param name="iconPath">Stable .ico path, or null to use the launcher's own icon.</param>
-    public string Create(string displayName, string slug, string? iconPath)
+    public string Create(string displayName, string slug, string? iconPath, ProfileApp app = ProfileApp.Claude)
     {
-        var path = PathFor(displayName);
+        var path = PathFor(displayName, app);
         if (File.Exists(path) && TryRead(path) is var existing && (existing is null || !IsOurs(existing)))
         {
             throw new ShortcutConflictException(path);
@@ -72,7 +81,7 @@ public sealed class ShortcutService(string desktopFolder, string launcherExePath
             launcherExePath,
             ArgumentsFor(slug),
             Path.GetDirectoryName(launcherExePath) ?? string.Empty,
-            $"Open Claude as \"{displayName}\"",
+            $"Open {(app == ProfileApp.WhatsApp ? "WhatsApp" : "Claude")} as \"{displayName}\"",
             iconPath ?? string.Empty));
 
         if (previous is not null && !string.Equals(previous, path, StringComparison.OrdinalIgnoreCase))
@@ -84,8 +93,8 @@ public sealed class ShortcutService(string desktopFolder, string launcherExePath
     }
 
     /// <summary>After a rename: if the profile has a shortcut, recreate it under the new name.</summary>
-    public string? Rename(string slug, string newDisplayName, string? iconPath) =>
-        Find(slug) is null ? null : Create(newDisplayName, slug, iconPath);
+    public string? Rename(string slug, string newDisplayName, string? iconPath, ProfileApp app = ProfileApp.Claude) =>
+        Find(slug) is null ? null : Create(newDisplayName, slug, iconPath, app);
 
     /// <summary>Deletes the profile's shortcut if there is one. Returns its path.</summary>
     public string? Delete(string slug)

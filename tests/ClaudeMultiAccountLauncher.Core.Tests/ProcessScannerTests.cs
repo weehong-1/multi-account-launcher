@@ -1,4 +1,5 @@
 using ClaudeMultiAccountLauncher.Core.Claude;
+using ClaudeMultiAccountLauncher.Core.WhatsApp;
 
 namespace ClaudeMultiAccountLauncher.Core.Tests;
 
@@ -13,7 +14,8 @@ public class ProcessScannerTests
 
     private sealed class FakeSource(params ProcessSnapshot[] processes) : IProcessSource
     {
-        public IReadOnlyList<ProcessSnapshot> GetClaudeProcesses() => processes;
+        public IReadOnlyList<ProcessSnapshot> GetProcesses(string imageName) =>
+            processes.Where(p => string.Equals(Path.GetFileName(p.ExecutablePath), imageName, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
     // Real command lines captured in the Phase 1 spike
@@ -80,6 +82,62 @@ public class ProcessScannerTests
 
         Assert.True(standalone.OwnsExecutable(@"C:\U\AppData\Local\AnthropicClaude\app-0.9.3\claude.exe"));
         Assert.False(standalone.OwnsExecutable(@"C:\U\AppData\Local\AnthropicClaudeOther\claude.exe"));
+    }
+
+    private const string WhatsAppExe = @"C:\Program Files\WindowsApps\5319275A.WhatsAppDesktop_2.2645.101.0_x64__cv1g1gvanyjgm\WhatsApp.Root.exe";
+
+    private sealed class FakeWindows(params int[] pids) : IWindowProbe
+    {
+        public IReadOnlySet<int> ProcessesWithVisibleWindow() => pids.ToHashSet();
+    }
+
+    // Real command line from 2026-11-22: WhatsApp's window lives in its push process
+    private static readonly ProcessSnapshot WhatsAppPush =
+        new(36328, WhatsAppExe, $"\"{WhatsAppExe}\" -RegisterForBGTaskServer /nowindow /pushnotification -Embedding");
+
+    [Fact]
+    public void WhatsApp_default_runs_when_its_process_has_a_visible_window() =>
+        Assert.True(new ProcessScanner(new FakeSource(WhatsAppPush)).IsWhatsAppDefaultRunning(new FakeWindows(36328)));
+
+    [Fact]
+    public void WhatsApp_default_without_a_visible_window_is_not_running()
+    {
+        Assert.False(new ProcessScanner(new FakeSource(WhatsAppPush)).IsWhatsAppDefaultRunning(new FakeWindows()));
+        Assert.False(new ProcessScanner(new FakeSource()).IsWhatsAppDefaultRunning(new FakeWindows(36328)));
+    }
+
+    [Fact]
+    public void A_window_of_another_process_does_not_count()
+    {
+        var elsewhere = new ProcessSnapshot(7, @"C:\tools\WhatsApp.Root.exe", null);
+
+        Assert.False(new ProcessScanner(new FakeSource(WhatsAppPush, elsewhere)).IsWhatsAppDefaultRunning(new FakeWindows(7, 99)));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Program Files\WindowsApps\5319275A.WhatsAppDesktop_2.2600.1.0_x64__cv1g1gvanyjgm\app\WhatsApp.Root.exe", true)]
+    [InlineData(@"C:\Program Files\WindowsApps\5319275A.WhatsAppDesktop_2.2645.101.0_x64__someoneelse\WhatsApp.Root.exe", false)]
+    [InlineData(@"C:\tools\WhatsApp.Root.exe", false)]
+    [InlineData(@"C:\Program Files\WindowsApps\5319275A.WhatsAppDesktop_2.2645.101.0_x64__cv1g1gvanyjgm\Other.exe", false)]
+    [InlineData(null, false)]
+    public void WhatsApp_exe_matches_any_version_of_its_package_only(string? exe, bool expected) =>
+        Assert.Equal(expected, WhatsAppPackage.OwnsExecutable(exe));
+
+    [Fact]
+    public void Running_whatsapp_profiles_come_from_launcher_command_lines()
+    {
+        const string launcher = @"C:\U\AppData\Local\Programs\claude-multi-account-launcher\claude-multi-account-launcher.exe";
+        var scanner = new ProcessScanner(new FakeSource(
+            new ProcessSnapshot(1, launcher, $"\"{launcher}\""),                        // the launcher window
+            new ProcessSnapshot(2, launcher, $"\"{launcher}\" --whatsapp resetrix"),
+            new ProcessSnapshot(3, launcher, $"\"{launcher}\" --whatsapp=Personal-2"),
+            new ProcessSnapshot(4, launcher, $"\"{launcher}\" --launch work"),           // a shortcut, not a window
+            new ProcessSnapshot(5, launcher, null)));
+
+        var running = scanner.RunningWhatsAppProfiles("claude-multi-account-launcher.exe");
+        Assert.Equal(["personal-2", "resetrix"], running.Keys.Order());
+        Assert.Equal(2, running["resetrix"]);
+        Assert.Equal(3, running["personal-2"]);
     }
 
     [Theory]

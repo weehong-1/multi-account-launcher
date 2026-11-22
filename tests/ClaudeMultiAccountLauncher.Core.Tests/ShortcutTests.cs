@@ -46,6 +46,42 @@ public sealed class ShortcutTests : IDisposable
     }
 
     [Fact]
+    public void Whatsapp_shortcuts_are_named_whatsapp_and_found_like_claude_ones()
+    {
+        var path = _service.Create("Resetrix", "resetrix", null, ProfileApp.WhatsApp);
+        var defaultPath = _service.Create("Default", "whatsapp-default", null, ProfileApp.WhatsApp);
+        var claude = _service.Create("Personal", "personal", null);
+
+        Assert.Equal(Path.Combine(_desktop, "WhatsApp - Resetrix.lnk"), path);
+        Assert.Equal("--launch resetrix", ShellLink.Read(path).Arguments);
+        Assert.Equal("--launch whatsapp-default", ShellLink.Read(defaultPath).Arguments);
+        Assert.Equal(path, _service.Find("resetrix"));
+        Assert.Equal(new[] { claude, defaultPath, path }.Order(), _service.FindAll().Order());
+    }
+
+    [Fact]
+    public void Whatsapp_and_claude_profiles_with_the_same_name_get_separate_shortcuts()
+    {
+        var claude = _service.Create("Personal", "personal", null);
+        var whatsApp = _service.Create("Personal", "personal-2", null, ProfileApp.WhatsApp);
+
+        Assert.NotEqual(claude, whatsApp);
+        Assert.True(File.Exists(claude));
+        Assert.True(File.Exists(whatsApp));
+    }
+
+    [Fact]
+    public void Renaming_a_whatsapp_profile_keeps_the_whatsapp_prefix()
+    {
+        _service.Create("Resetrix", "resetrix", null, ProfileApp.WhatsApp);
+
+        var renamed = _service.Rename("resetrix", "Resetrix Sales", null, ProfileApp.WhatsApp);
+
+        Assert.Equal(Path.Combine(_desktop, "WhatsApp - Resetrix Sales.lnk"), renamed);
+        Assert.False(File.Exists(Path.Combine(_desktop, "WhatsApp - Resetrix.lnk")));
+    }
+
+    [Fact]
     public void Find_ignores_other_profiles_and_foreign_shortcuts()
     {
         _service.Create("Work", "work", null);
@@ -179,5 +215,45 @@ public sealed class ShortcutTests : IDisposable
     {
         var install = new ClaudeInstall(InstallKind.Msix, @"C:\WA\claude-desktop.exe", @"C:\P\Claude_1_x64__pzs8sxrjxfjjc");
         Assert.Equal(@"C:\P\Claude_1_x64__pzs8sxrjxfjjc\app\Claude.exe", install.IconSourcePath);
+    }
+
+    /// <summary>Smallest byte string IcoFile reads as a PNG: signature plus IHDR width and height.</summary>
+    private static byte[] FakePng(int size)
+    {
+        var png = new byte[33];
+        new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }.CopyTo(png, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(png.AsSpan(16), (uint)size);
+        BinaryPrimitives.WriteUInt32BigEndian(png.AsSpan(20), (uint)size);
+        return png;
+    }
+
+    [Fact]
+    public void WhatsAppIcon_is_built_from_the_package_pngs_preferring_unplated()
+    {
+        var paths = new LauncherPaths(Path.Combine(_root, "Roaming"), Path.Combine(_root, "Local"), Path.Combine(_root, "home"));
+        var package = Path.Combine(_root, "5319275A.WhatsAppDesktop_2.2645.101.0_x64__cv1g1gvanyjgm");
+        var assets = Directory.CreateDirectory(Path.Combine(package, "Assets")).FullName;
+        File.WriteAllBytes(Path.Combine(assets, "AppList.targetsize-16_altform-unplated.png"), FakePng(16));
+        File.WriteAllBytes(Path.Combine(assets, "AppList.targetsize-16.png"), [1, 2, 3]); // plated: not used
+        File.WriteAllBytes(Path.Combine(assets, "AppList.targetsize-32.png"), FakePng(32));
+        File.WriteAllBytes(Path.Combine(assets, "AppList.targetsize-256_altform-unplated.png"), FakePng(256));
+
+        var ico = WhatsAppIcon.Ensure(paths, new Core.WhatsApp.WhatsAppDesktop(package));
+
+        Assert.Equal(paths.WhatsAppIconFile, ico);
+        var bytes = File.ReadAllBytes(ico!);
+        Assert.Equal(3, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(4)));
+        Assert.Equal([16, 32, 0], new[] { bytes[6], bytes[6 + 16], bytes[6 + 32] }); // 256 is written as 0
+        Assert.Equal(paths.WhatsAppIconFile, WhatsAppIcon.Ensure(paths, null)); // reused, even once uninstalled
+    }
+
+    [Fact]
+    public void WhatsAppIcon_is_null_without_whatsapp_or_its_pngs()
+    {
+        var paths = new LauncherPaths(Path.Combine(_root, "Roaming"), Path.Combine(_root, "Local"), Path.Combine(_root, "home"));
+
+        Assert.Null(WhatsAppIcon.Ensure(paths, null));
+        Assert.Null(WhatsAppIcon.Ensure(paths, new Core.WhatsApp.WhatsAppDesktop(Path.Combine(_root, "empty"))));
+        Assert.False(File.Exists(paths.WhatsAppIconFile));
     }
 }

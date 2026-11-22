@@ -10,10 +10,14 @@ public static class SlugGenerator
     private const string Fallback = "profile";
 
     /// <summary>
-    /// Slugs that would be ambiguous: "default" collides with the built-in Default profile
-    /// in <c>--launch default</c>.
+    /// Slugs that would be ambiguous in <c>--launch &lt;slug&gt;</c>: the built-in Claude Default
+    /// and WhatsApp Default. One slug space is shared by Claude and WhatsApp profiles.
     /// </summary>
-    private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal) { "default" };
+    private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
+    {
+        Startup.StartupCommand.DefaultSlug,
+        Startup.StartupCommand.WhatsAppDefaultSlug,
+    };
 
     public static string Create(string name, IEnumerable<string> existingSlugs)
     {

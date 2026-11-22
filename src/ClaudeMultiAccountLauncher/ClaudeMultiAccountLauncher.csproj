@@ -18,6 +18,8 @@
     <!-- Version comes from Directory.Build.props -->
 
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Own Main in Program.cs: WhatsApp profiles hand off to their running process first (FR-W6) -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
 
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

@@ -147,6 +147,68 @@ public sealed class UninstallerTests : IDisposable
         Assert.False(Directory.Exists(_paths.AppFolder));
     }
 
+    private static readonly Profile Sales = new("Sales", "sales", DateTimeOffset.UnixEpoch, ProfileApp.WhatsApp);
+
+    /// <summary>A WhatsApp profile, a WhatsApp folder kept after Remove, and the official app's data.</summary>
+    private string SeedWhatsApp()
+    {
+        Directory.CreateDirectory(_paths.WhatsAppDataFolder("sales"));
+        File.WriteAllText(Path.Combine(_paths.WhatsAppDataFolder("sales"), "Cookies"), "x");
+        Directory.CreateDirectory(_paths.WhatsAppDataFolder("kept"));
+        _shortcuts.Create("Sales", "sales", null, ProfileApp.WhatsApp);
+        _shortcuts.Create("Default", "whatsapp-default", null, ProfileApp.WhatsApp);
+        var official = Path.Combine(_paths.LocalAppData, "Packages", "5319275A.WhatsAppDesktop_cv1g1gvanyjgm", "LocalState");
+        Directory.CreateDirectory(official);
+        return official;
+    }
+
+    [Fact]
+    public void Plan_lists_whatsapp_data_shortcuts_and_the_local_folder()
+    {
+        SeedMachine();
+        SeedWhatsApp();
+
+        var plan = NewUninstaller().Plan([Personal, Work, Sales], _installedExe, null);
+
+        Assert.Contains(plan.Items, i => i is { Kind: UninstallItemKind.WhatsAppData, ProfileName: "Sales" } && i.Path == _paths.WhatsAppDataFolder("sales"));
+        Assert.Contains(plan.Items, i => i.Kind == UninstallItemKind.DesktopShortcut && i.Path == Path.Combine(_desktop, "WhatsApp - Sales.lnk"));
+        Assert.Contains(plan.Items, i => i.Kind == UninstallItemKind.DesktopShortcut && i.Path == Path.Combine(_desktop, "WhatsApp - Default.lnk"));
+        Assert.Contains(plan.Items, i => i.Kind == UninstallItemKind.LocalLauncherData && i.Path == _paths.LocalAppFolder);
+        Assert.DoesNotContain(plan.Items, i => i.Path == _paths.DataFolder("sales")); // not a Claude profile
+        Assert.Equal([_paths.WhatsAppDataFolder("kept")], plan.OldProfileFolders.Select(i => i.Path));
+    }
+
+    [Fact]
+    public void Unticked_old_whatsapp_folders_survive_removing_the_local_folder()
+    {
+        SeedMachine();
+        var official = SeedWhatsApp();
+        var uninstaller = NewUninstaller();
+        var plan = uninstaller.Plan([Personal, Work, Sales], _installedExe, null);
+
+        var failed = uninstaller.DeleteData(plan, includeOldProfileFolders: false);
+
+        Assert.Empty(failed);
+        Assert.False(Directory.Exists(_paths.WhatsAppDataFolder("sales")));
+        Assert.True(Directory.Exists(_paths.WhatsAppDataFolder("kept")), "kept unless ticked");
+        Assert.False(File.Exists(Path.Combine(_desktop, "WhatsApp - Sales.lnk")));
+        Assert.True(Directory.Exists(official), "the official WhatsApp's data is never touched");
+    }
+
+    [Fact]
+    public void Ticked_old_whatsapp_folders_go_with_the_whole_local_folder()
+    {
+        SeedMachine();
+        SeedWhatsApp();
+        File.WriteAllText(Path.Combine(_paths.LocalAppFolder, "stray.txt"), "x");
+        var uninstaller = NewUninstaller();
+        var plan = uninstaller.Plan([Personal, Work, Sales], _installedExe, null);
+
+        Assert.Empty(uninstaller.DeleteData(plan, includeOldProfileFolders: true));
+
+        Assert.False(Directory.Exists(_paths.LocalAppFolder));
+    }
+
     [Fact]
     public void Installed_run_finishes_with_msi_uninstall_and_temp_cleanup()
     {

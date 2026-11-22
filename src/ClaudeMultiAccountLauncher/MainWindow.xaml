@@ -14,6 +14,106 @@
         <Grid.Resources>
             <!-- Bundled copy first, so it works where JetBrains Mono isn't installed -->
             <FontFamily x:Key="MonoFont">ms-appx:///Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+            <DataTemplate x:Key="ProfileRowTemplate" x:DataType="local:ProfileRow">
+                <Grid
+                    Padding="16,12"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    ColumnSpacing="12"
+                    CornerRadius="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="{x:Bind Name, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Grid Width="8" Height="8" VerticalAlignment="Center">
+                                <Ellipse Fill="{ThemeResource SystemFillColorSuccessBrush}" Visibility="{x:Bind IsRunning, Mode=OneWay}" />
+                                <Ellipse Fill="{ThemeResource ControlStrongFillColorDefaultBrush}" Visibility="{x:Bind IsNotRunning, Mode=OneWay}" />
+                            </Grid>
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind StatusText, Mode=OneWay}" />
+                        </StackPanel>
+                        <TextBlock
+                            FontFamily="{StaticResource MonoFont}"
+                            FontSize="11"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            IsTextSelectionEnabled="True"
+                            Text="{x:Bind FolderText}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{x:Bind FolderText}" />
+                    </StackPanel>
+
+                    <Button
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Click="LaunchButton_Click"
+                        Content="Launch"
+                        IsEnabled="{x:Bind CanLaunch, Mode=OneWay}"
+                        Tag="{x:Bind}" />
+
+                    <Button
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="More options"
+                        Content="&#xE712;"
+                        FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                        ToolTipService.ToolTip="More options">
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuFlyoutItem
+                                    Click="ShortcutMenu_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Create desktop shortcut">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE71B;" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem
+                                    Click="QuitMenu_Click"
+                                    IsEnabled="{x:Bind CanQuit, Mode=OneWay}"
+                                    Tag="{x:Bind}"
+                                    Text="Quit"
+                                    Visibility="{x:Bind IsWhatsAppProfile}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE711;" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutSeparator Visibility="{x:Bind IsCustom}" />
+                                <MenuFlyoutItem
+                                    Click="RenameMenu_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Rename"
+                                    Visibility="{x:Bind IsCustom}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8AC;" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutSeparator Visibility="{x:Bind IsCustom}" />
+                                <MenuFlyoutItem
+                                    Click="RemoveMenu_Click"
+                                    IsEnabled="{x:Bind CanRemove, Mode=OneWay}"
+                                    Tag="{x:Bind}"
+                                    Text="Remove"
+                                    Visibility="{x:Bind IsCustom}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE74D;" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                </Grid>
+            </DataTemplate>
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -83,104 +183,32 @@
                 Visibility="{x:Bind NoticeBar.IsOpen, Mode=OneWay}" />
         </StackPanel>
 
+        <!-- Two sections, each with its Default first (WhatsApp spec section 3) -->
         <ScrollViewer Grid.Row="2">
-            <ItemsRepeater x:Name="ProfileList" Margin="24,0,24,24">
-                <ItemsRepeater.Layout>
-                    <StackLayout Spacing="8" />
-                </ItemsRepeater.Layout>
-                <ItemsRepeater.ItemTemplate>
-                    <DataTemplate x:DataType="local:ProfileRow">
-                        <Grid
-                            Padding="16,12"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            ColumnSpacing="12"
-                            CornerRadius="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+            <StackPanel Margin="24,0,24,24" Spacing="8">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Claude" />
+                <ItemsRepeater x:Name="ClaudeList" ItemTemplate="{StaticResource ProfileRowTemplate}">
+                    <ItemsRepeater.Layout>
+                        <StackLayout Spacing="8" />
+                    </ItemsRepeater.Layout>
+                </ItemsRepeater>
 
-                            <StackPanel VerticalAlignment="Center" Spacing="2">
-                                <TextBlock
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="{x:Bind Name, Mode=OneWay}"
-                                    TextTrimming="CharacterEllipsis" />
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Grid Width="8" Height="8" VerticalAlignment="Center">
-                                        <Ellipse Fill="{ThemeResource SystemFillColorSuccessBrush}" Visibility="{x:Bind IsRunning, Mode=OneWay}" />
-                                        <Ellipse Fill="{ThemeResource ControlStrongFillColorDefaultBrush}" Visibility="{x:Bind IsNotRunning, Mode=OneWay}" />
-                                    </Grid>
-                                    <TextBlock
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind StatusText, Mode=OneWay}" />
-                                </StackPanel>
-                                <TextBlock
-                                    FontFamily="{StaticResource MonoFont}"
-                                    FontSize="11"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                    IsTextSelectionEnabled="True"
-                                    Text="{x:Bind FolderText}"
-                                    TextTrimming="CharacterEllipsis"
-                                    ToolTipService.ToolTip="{x:Bind FolderText}" />
-                            </StackPanel>
-
-                            <Button
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                Click="LaunchButton_Click"
-                                Content="Launch"
-                                IsEnabled="{x:Bind CanLaunch, Mode=OneWay}"
-                                Tag="{x:Bind}" />
-
-                            <Button
-                                Grid.Column="2"
-                                VerticalAlignment="Center"
-                                AutomationProperties.Name="More options"
-                                Content="&#xE712;"
-                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
-                                ToolTipService.ToolTip="More options">
-                                <Button.Flyout>
-                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                        <MenuFlyoutItem
-                                            Click="ShortcutMenu_Click"
-                                            Tag="{x:Bind}"
-                                            Text="Create desktop shortcut">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE71B;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator Visibility="{x:Bind IsCustom}" />
-                                        <MenuFlyoutItem
-                                            Click="RenameMenu_Click"
-                                            Tag="{x:Bind}"
-                                            Text="Rename"
-                                            Visibility="{x:Bind IsCustom}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE8AC;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator Visibility="{x:Bind IsCustom}" />
-                                        <MenuFlyoutItem
-                                            Click="RemoveMenu_Click"
-                                            IsEnabled="{x:Bind CanRemove, Mode=OneWay}"
-                                            Tag="{x:Bind}"
-                                            Text="Remove"
-                                            Visibility="{x:Bind IsCustom}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE74D;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                    </MenuFlyout>
-                                </Button.Flyout>
-                            </Button>
-                        </Grid>
-                    </DataTemplate>
-                </ItemsRepeater.ItemTemplate>
-            </ItemsRepeater>
+                <TextBlock
+                    Margin="0,16,0,0"
+                    Style="{StaticResource SubtitleTextBlockStyle}"
+                    Text="WhatsApp" />
+                <ItemsRepeater x:Name="WhatsAppList" ItemTemplate="{StaticResource ProfileRowTemplate}">
+                    <ItemsRepeater.Layout>
+                        <StackLayout Spacing="8" />
+                    </ItemsRepeater.Layout>
+                </ItemsRepeater>
+                <TextBlock
+                    x:Name="WhatsAppEmptyText"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="WhatsApp Desktop isn't installed. Add a WhatsApp profile with Add profile."
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed" />
+            </StackPanel>
         </ScrollViewer>
 
         <TextBlock
