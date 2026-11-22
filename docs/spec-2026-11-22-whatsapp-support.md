@@ -92,26 +92,35 @@ profiles:
   - Icon: the official WhatsApp icon, copied once to a stable `.ico` next
     to `profiles.json` (as in Claude spec FR-8). If WhatsApp Desktop
     isn't installed, the launcher's own icon is used
+  - Where the icon comes from (verified 2026-11-22): `WhatsApp.Root.exe`
+    has no icon resource. Like other Store apps, the package keeps its
+    icon as PNGs, `Assets\AppList.targetsize-<n>_altform-unplated.png`
+    (transparent; 16 to 256 px). The `.ico` holds those PNGs as they are.
+    WhatsApp profile windows use the same `.ico`
 - **Rename and remove** (Claude spec FR-5): rename changes the display
   name only; remove asks a second time before deleting the profile's data
   folder (default: keep). A running profile can't be removed; quit it
   first (FR-W4)
-  - Removing a WhatsApp profile also removes its Start at sign-in entry
-    (FR-W8), so a removed profile is never started at sign-in (decided
-    2026-11-22)
 - **Running indicator** (Claude spec FR-7): detected by process command
   line, here launcher processes carrying the WhatsApp profile argument
   for that slug. Updates live, the same way as for Claude
-  - WhatsApp Default (decided 2026-11-22): found as `WhatsApp.Root.exe`
-    by package folder, `5319275A.WhatsAppDesktop_*__cv1g1gvanyjgm`, any
-    version, the same way as Claude MSIX in Claude spec FR-7. The
-    background push process (arguments `-RegisterForBGTaskServer
-    /nowindow`) does not count
+  - WhatsApp Default (decided 2026-11-22, revised the same day): found
+    as `WhatsApp.Root.exe` by package folder,
+    `5319275A.WhatsAppDesktop_*__cv1g1gvanyjgm`, any version, the same
+    way as Claude MSIX in Claude spec FR-7. It counts as running only
+    while that process has a visible window
+  - Why by window, not by command line (verified 2026-11-22): WhatsApp
+    opens its window inside its background push process, started as
+    `WhatsApp.Root.exe -RegisterForBGTaskServer /nowindow
+    /pushnotification -Embedding`, and there is no other process. The
+    first rule (the push process doesn't count) would have shown an open
+    WhatsApp as not running. Also seen the same day: closing the window
+    ended the process entirely, and `--launch whatsapp-default` then
+    started a new one with no arguments
 - **Uninstall and remove everything** (Claude spec FR-9): also lists and
-  deletes each WhatsApp profile's data folder, every `WhatsApp - *`
-  shortcut the launcher made, and the WhatsApp profiles' startup entries
-  (FR-W8). Never touches the official WhatsApp Desktop or its data (the
-  WhatsApp Default). Running profiles (decided 2026-11-22):
+  deletes each WhatsApp profile's data folder and every `WhatsApp - *`
+  shortcut the launcher made. Never touches the official WhatsApp
+  Desktop or its data (the WhatsApp Default). Running profiles (decided 2026-11-22):
   - Running WhatsApp profiles are listed, and after the user confirms,
     the launcher quits them itself
   - Claude profiles unchanged: the user still closes them first
@@ -135,35 +144,34 @@ profiles:
 - The launcher does not sign in for the user and stores nothing about the
   account; the session lives only in the profile's WebView2 data
 
-### FR-W2 Notifications
+### FR-W2 Notifications (dropped 2026-11-22)
 
-- Web notifications from WhatsApp Web are shown as Windows toasts
-- Decided 2026-11-22:
-  - The notification permission is granted automatically for WhatsApp
-    Web (FR-W7)
-  - Each toast shows the profile name (e.g. "WhatsApp - Resetrix")
-  - Clicking a toast brings that profile's window to the front, also
-    when it is hidden in the tray
+- No Windows toasts for WhatsApp messages (section 7). In the Phase 1
+  spike, toasts from the unpackaged spike exe were accepted by Windows
+  (they appear in its toast history) but never displayed, while toasts
+  from other apps were. Vernon decided toasts aren't needed
 
 ### FR-W3 Unread count
 
 - WhatsApp Web shows the unread count in the page title. The launcher
   reads the title and shows the count on the profile window's taskbar
   button
-- The title format (e.g. a leading `(3)`) is to be verified against the
-  current WhatsApp Web before implementation
+- Title format (verified 2026-11-22, WebView2 157): `WhatsApp` with no
+  unread, `(n) WhatsApp` with unread, where n is the number of **unread
+  chats**, not messages (2 chats holding 3 unread messages showed
+  `(2) WhatsApp`). While loading, the title is `WhatsApp Web`
 
-### FR-W4 Close to tray
+### FR-W4 Close and Quit
 
-- Closing the window hides it to the notification area instead of
-  exiting, so the profile keeps receiving notifications
-- A hidden window still counts as running (FR-7 behaviour, section 4)
-- Quit (decided 2026-11-22): a `Quit` item in the tray icon's menu, and
-  also in the profile row's ⋯ menu in the launcher. Quitting ends the
-  profile's process
-- So a WhatsApp profile stays running until it is quit. Remove needs the
-  profile quit first; Uninstall and remove everything quits running
-  WhatsApp profiles itself after confirmation (section 4)
+- Close to tray is dropped (decided 2026-11-22): there is no tray icon.
+  Closing the window quits the profile, like Quit
+- Quit (decided 2026-11-22): a `Quit` item in the profile row's ⋯ menu
+  in the launcher. Quitting ends the profile's process
+- Remove needs the profile quit first; Uninstall and remove everything
+  quits running WhatsApp profiles itself after confirmation (section 4)
+- The launcher's WhatsApp section (section 3) is the panel for opening
+  several WhatsApp windows: Launch on each row opens that profile's
+  window, or brings it to the front if it's open (FR-W6)
 
 ### FR-W5 External links
 
@@ -177,36 +185,50 @@ profiles:
   Claude this for free, doesn't apply to launcher processes
 - The launcher keeps its own single-instance lock per slug. A second
   launch of a running profile (from the launcher or a shortcut) hands
-  off to the running process, which brings its window to the front (also
-  when hidden in the tray, FR-W4), and then exits without opening a
-  window of its own
+  off to the running process, which brings its window to the front, and
+  then exits without opening a window of its own
+- Verified 2026-11-22 in the Phase 1 spike: a Windows App SDK
+  `AppInstance` key per slug (`whatsapp-<slug>`) with activation
+  redirect. The second process handed off and exited within about 25 ms;
+  the running window came to the front (also when it was hidden), and
+  Windows allowed it to take the foreground
 
 ### FR-W7 Permission requests (decided 2026-11-22)
 
-- Notifications: granted automatically for WhatsApp Web
-- Every other request (microphone, camera, clipboard, etc.) shows
-  WebView2's own prompt, so the user decides
+- Microphone, camera, clipboard and other requests show WebView2's own
+  prompt, so the user decides
+- The notification permission is open question 2 (it was granted
+  automatically only for toasts, FR-W2)
+- Seen in the spike (2026-11-22): on every page load WhatsApp Web makes
+  one permission request that WebView2 157 reports as kind 13, a value
+  the WebView2 SDK in use (1.0.3719.77) doesn't name. It goes to
+  WebView2's default handling like any other request; no prompt was
+  seen
 
-### FR-W8 Start at sign-in (decided 2026-11-22)
+### FR-W8 Start at sign-in (dropped 2026-11-22)
 
-- Per WhatsApp profile, off by default
-- Turned on and off with a `Start at sign-in` option in the profile row's
-  ⋯ menu
-- The startup entry itself is the setting; no new field in
-  `profiles.json` (section 3) (decided 2026-11-22)
-- Removing the profile removes its startup entry (section 4)
-- A profile started this way starts hidden in the tray
-- Uninstall and remove everything removes these startup entries too
-  (section 4)
+- Dropped with close to tray (FR-W4): a profile started at sign-in would
+  only be useful running hidden
 
 ### FR-W9 Downloads (decided 2026-11-22)
 
 - Downloaded attachments go where WebView2 puts them by default: the
   Windows Downloads folder
 
-All of FR-W2 and FR-W3 work only from what WebView2 hands the host (the
-notification and the page title). Nothing is injected into the page
-(section 7).
+FR-W3 works only from what WebView2 hands the host (the page title).
+Nothing is injected into the page (section 7).
+
+### Spike results (Phase 1, 2026-11-22)
+
+Throwaway WinUI 3 app, same SDKs as the launcher (Windows App SDK 2.7,
+WebView2 SDK 1.0.3719.77), WebView2 runtime 157.0.4341.60 on Vernon's PC:
+
+- WhatsApp Web loads and signs in by QR code in WebView2 with the
+  default user agent (Edge 157); no user agent change needed
+- The sign-in survives closing and restarting the profile's process
+  (the session lives in the WebView2 data folder, FR-W1)
+- Two profiles ran side by side, each with its own data folder
+- Unread title format: FR-W3. Single instance: FR-W6. Toasts: FR-W2
 
 ## 6. Storage
 
@@ -235,13 +257,15 @@ notification and the page title). Nothing is injected into the page
   calls of its own; WebView2 only navigates to WhatsApp Web, and other
   links go to the default browser (FR-W5)
 - Changing the official WhatsApp Desktop app (section 1)
+- Dropped 2026-11-22: Windows toasts (FR-W2), close to tray (FR-W4) and
+  start at sign-in (FR-W8)
 
 ## 8. Known risks
 
 - Unofficial wrapper: Meta may flag accounts that use it. No guarantee it
   keeps working or that accounts are left alone
-- WhatsApp Web changes can break notifications or the unread count (for
-  example, a different page title format)
+- WhatsApp Web changes can break the unread count (for example, a
+  different page title format)
 - RAM: each WhatsApp window is its own WebView2 instance, a few hundred
   MB each
 
@@ -264,30 +288,22 @@ notification and the page title). Nothing is injected into the page
 - [ ] The WhatsApp Default starts the official WhatsApp Desktop
 - [ ] With WhatsApp Desktop not installed, the WhatsApp Default isn't
       listed and WhatsApp profiles still work
-- [ ] A new message in a profile shows a Windows toast with the profile
-      name; clicking it brings that profile's window to the front, also
-      from the tray
-- [ ] The notification permission is granted without a prompt; using the
-      microphone (e.g. a voice note) shows WebView2's prompt
+- [ ] Using the microphone (e.g. a voice note) shows WebView2's prompt
 - [ ] The taskbar button shows the profile's unread count
-- [ ] Closing the window hides it to the tray; notifications still arrive
-- [ ] `Quit` in the tray menu ends the profile; `Quit` in the profile
-      row's ⋯ menu does the same; the running indicator clears
-- [ ] With `Start at sign-in` on, the profile starts hidden in the tray
-      after signing in to Windows; with it off (the default), it doesn't
+- [ ] Closing the window ends the profile, and so does `Quit` in the
+      profile row's ⋯ menu; the running indicator clears
 - [ ] A link in a chat opens in the default browser
 - [ ] Desktop shortcut `WhatsApp - <name>` opens that profile in one click
 - [ ] Rename and Remove work as for Claude profiles; Remove keeps the data
-      folder unless deletion is confirmed, and removes the profile's
-      Start at sign-in entry, so it isn't started at the next Windows
-      sign-in
+      folder unless deletion is confirmed
 - [ ] Running indicator shows and clears for WhatsApp profiles and for
-      the WhatsApp Default; WhatsApp's background push process alone
-      doesn't count as running
+      the WhatsApp Default; the WhatsApp Default shows Running while its
+      window is open and clears when the window is closed, even though
+      its background process keeps running
 - [ ] `Uninstall and remove everything…` lists running WhatsApp profiles,
-      quits them after confirmation, removes WhatsApp profiles' data,
-      shortcuts and startup entries, and leaves the official WhatsApp
-      Desktop and its data untouched
+      quits them after confirmation, removes WhatsApp profiles' data
+      and shortcuts, and leaves the official WhatsApp Desktop and its
+      data untouched
 - [ ] The launcher makes no network calls of its own; the WebView2
       control only navigates to WhatsApp Web, and other links open in the
       default browser
@@ -296,3 +312,7 @@ notification and the page title). Nothing is injected into the page
 
 1. The new display name and GitHub repo name (only those change; section
    6). The repo is not renamed until this is decided
+2. Notification permission now that toasts are dropped (FR-W7): deny it,
+   or leave it to WebView2's prompt? WhatsApp Web only asks when the user
+   clicks "Turn on" in its "Message and call notifications are off"
+   banner (seen in the spike)
