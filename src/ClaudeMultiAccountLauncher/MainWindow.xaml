@@ -4,7 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:ClaudeMultiAccountLauncher"
-    Title="Claude Multi-Account Launcher">
+    Title="Multi-Account Launcher">
 
     <Window.SystemBackdrop>
         <MicaBackdrop />
@@ -128,7 +128,7 @@
             <TextBlock
                 VerticalAlignment="Center"
                 Style="{StaticResource CaptionTextBlockStyle}"
-                Text="Claude Multi-Account Launcher" />
+                Text="Multi-Account Launcher" />
         </Grid>
 
         <!-- A closed InfoBar only hides its content; Visibility follows IsOpen so it takes no space -->

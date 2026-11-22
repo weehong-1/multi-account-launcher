@@ -1,4 +1,4 @@
-# claude-multi-account-launcher
+# multi-account-launcher
 
 Windows launcher to run several Claude Desktop accounts side by side, each
 in its own profile, and open any of them with one click.
@@ -20,13 +20,13 @@ rights, and makes no network calls.
 
 ## Install
 
-Download from [Releases](https://github.com/weehong-1/claude-multi-account-launcher/releases/latest).
+Download from [Releases](https://github.com/weehong-1/multi-account-launcher/releases/latest).
 
 **Installer (recommended):** run `claude-multi-account-launcher-<version>-x64.msi`.
 
 - Installs for your user only, no admin prompt, into
   `%LOCALAPPDATA%\Programs\claude-multi-account-launcher\`
-- Adds **Claude Multi-Account Launcher** to the Start menu and opens it
+- Adds **Multi-Account Launcher** to the Start menu and opens it
 - To update, run the newer MSI; it replaces the old version
 - To uninstall, see [Uninstall](#uninstall)
 
@@ -34,7 +34,7 @@ Download from [Releases](https://github.com/weehong-1/claude-multi-account-launc
 release's MSI and runs it, closing the launcher first if it's open):
 
 ```powershell
-$release = Invoke-RestMethod https://api.github.com/repos/weehong-1/claude-multi-account-launcher/releases/latest
+$release = Invoke-RestMethod https://api.github.com/repos/weehong-1/multi-account-launcher/releases/latest
 $msi = $release.assets | Where-Object name -like '*.msi' | Select-Object -First 1
 $file = Join-Path $env:TEMP $msi.name
 Invoke-WebRequest $msi.browser_download_url -OutFile $file
@@ -110,7 +110,7 @@ the account online).
 If you ran the portable exe, it tells you to delete that file yourself at
 the end.
 
-**Remove only the app:** Settings → Apps → Installed apps → Claude
+**Remove only the app:** Settings → Apps → Installed apps →
 Multi-Account Launcher → Uninstall. This keeps your profiles and their
 data, so reinstalling picks them up again.
 
@@ -200,13 +200,13 @@ Host toy.github.com
 Clone through the alias:
 
 ```powershell
-git clone git@toy.github.com:weehong-1/claude-multi-account-launcher.git
+git clone git@toy.github.com:weehong-1/multi-account-launcher.git
 ```
 
 Or switch an existing clone to it:
 
 ```powershell
-git remote set-url origin git@toy.github.com:weehong-1/claude-multi-account-launcher.git
+git remote set-url origin git@toy.github.com:weehong-1/multi-account-launcher.git
 ```
 
 Check which account the alias signs in as. It should greet `weehong-1`:

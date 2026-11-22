@@ -12,8 +12,8 @@
     <Nullable>enable</Nullable>
 
     <!-- Shown in Explorer file properties and Task Manager -->
-    <Product>Claude Multi-Account Launcher</Product>
-    <AssemblyTitle>Claude Multi-Account Launcher</AssemblyTitle>
+    <Product>Multi-Account Launcher</Product>
+    <AssemblyTitle>Multi-Account Launcher</AssemblyTitle>
     <Description>Unofficial launcher that runs several Claude Desktop accounts side by side.</Description>
     <!-- Version comes from Directory.Build.props -->
 

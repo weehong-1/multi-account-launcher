@@ -4,11 +4,11 @@
 - Owner: Vernon KOH
 - Status: ready for implementation, pending Vernon's final review
 - Implementer: Claude Code account
-- Name: `claude-multi-account-launcher`. Only the display name and the
-  GitHub repo name will change (decided 2026-11-22; section 6). The new
-  name is open question 1; the repo is not renamed yet
-- Repo: GitHub `weehong-1/claude-multi-account-launcher` (this repo, not
-  a new one)
+- Name: display name **Multi-Account Launcher**, GitHub repo
+  `weehong-1/multi-account-launcher` (decided 2026-11-22). Internal
+  names stay `claude-multi-account-launcher` (section 6)
+- Repo: GitHub `weehong-1/multi-account-launcher`, renamed from
+  `claude-multi-account-launcher` (this repo, not a new one)
 - Builds on: [spec-2026-11-19-claude-multi-account-launcher.md](spec-2026-11-19-claude-multi-account-launcher.md),
   which stays unchanged. "Claude spec FR-n" below refers to it
 
@@ -242,8 +242,8 @@ WebView2 SDK 1.0.3719.77), WebView2 runtime 157.0.4341.60 on Vernon's PC:
     and no clash with other apps' folders. The Cowork rule that forces
     Claude data directly under `%APPDATA%` (Claude spec section 8) does
     not apply here
-- Internal names stay (decided 2026-11-22): the rename (open question 1)
-  changes only the display name and the GitHub repo name. The install
+- Internal names stay (decided 2026-11-22): the rename to Multi-Account
+  Launcher changes only the display name and the GitHub repo name. The install
   folder, `%APPDATA%\claude-multi-account-launcher`, `profiles.json` and
   the folder above keep their names. No migration, and MSI upgrades are
   unaffected
@@ -310,8 +310,9 @@ WebView2 SDK 1.0.3719.77), WebView2 runtime 157.0.4341.60 on Vernon's PC:
 
 ## 10. Open questions
 
-1. The new display name and GitHub repo name (only those change; section
-   6). The repo is not renamed until this is decided
+1. Decided 2026-11-22: the display name is Multi-Account Launcher and
+   the GitHub repo is `weehong-1/multi-account-launcher` (header,
+   section 6)
 2. Notification permission now that toasts are dropped (FR-W7): deny it,
    or leave it to WebView2's prompt? WhatsApp Web only asks when the user
    clicks "Turn on" in its "Message and call notifications are off"

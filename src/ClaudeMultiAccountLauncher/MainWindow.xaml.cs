@@ -710,7 +710,7 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(new TextBlock
         {
-            Text = "This removes Claude Multi-Account Launcher and everything it created on this PC. "
+            Text = "This removes Multi-Account Launcher and everything it created on this PC. "
                 + "The profiles' sign-ins, chats and Claude Code settings are deleted and can't be recovered. "
                 + "Your Default Claude, the official WhatsApp Desktop and their data are not touched.",
             TextWrapping = TextWrapping.Wrap,

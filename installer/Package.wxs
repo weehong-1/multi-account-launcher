@@ -7,7 +7,7 @@
     Profiles and their folders are user data and are left alone on uninstall.
   -->
   <Package
-      Name="Claude Multi-Account Launcher"
+      Name="Multi-Account Launcher"
       Manufacturer="claude-multi-account-launcher"
       Version="$(Version)"
       UpgradeCode="{01B9B86C-279A-46EE-A998-5AC108B551E9}"
@@ -22,7 +22,7 @@
 
     <Icon Id="AppIcon.ico" SourceFile="$(AssetsDir)AppIcon.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/weehong-1/claude-multi-account-launcher" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/weehong-1/multi-account-launcher" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPNOREPAIR" Value="1" />
 
@@ -45,7 +45,7 @@
 
     <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
       <Shortcut Id="StartMenuShortcut"
-                Name="Claude Multi-Account Launcher"
+                Name="Multi-Account Launcher"
                 Description="Run several Claude Desktop accounts side by side"
                 Target="[INSTALLFOLDER]claude-multi-account-launcher.exe"
                 WorkingDirectory="INSTALLFOLDER" />
