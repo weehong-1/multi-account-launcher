@@ -37,6 +37,13 @@ public static partial class WhatsAppWeb
             : 0;
     }
 
+    /// <summary>
+    /// A profile window's title: <c>WhatsApp - name</c>, led by <c>(n) </c> while there are unread
+    /// chats, as WhatsApp Web's own title is.
+    /// </summary>
+    public static string WindowTitle(string profileName, int unread) =>
+        (unread > 0 ? $"({unread}) " : string.Empty) + "WhatsApp - " + profileName;
+
     [GeneratedRegex(@"^\((\d{1,6})\)\s")]
     private static partial Regex UnreadPrefix();
 }

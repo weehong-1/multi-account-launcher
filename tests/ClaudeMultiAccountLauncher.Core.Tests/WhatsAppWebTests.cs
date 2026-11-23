@@ -17,6 +17,12 @@ public class WhatsAppWebTests
         Assert.Equal(expected, WhatsAppWeb.UnreadCount(title));
 
     [Theory]
+    [InlineData("Resetrix", 0, "WhatsApp - Resetrix")]
+    [InlineData("Resetrix", 3, "(3) WhatsApp - Resetrix")]
+    public void Window_title_is_the_profile_name_led_by_the_unread_count(string name, int unread, string expected) =>
+        Assert.Equal(expected, WhatsAppWeb.WindowTitle(name, unread));
+
+    [Theory]
     [InlineData("https://web.whatsapp.com/", true)]
     [InlineData("https://WEB.whatsapp.com/some/path?x=1", true)]
     [InlineData("http://web.whatsapp.com/", false)]

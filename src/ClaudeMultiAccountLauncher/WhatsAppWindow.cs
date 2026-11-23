@@ -21,12 +21,16 @@ public sealed class WhatsAppWindow : Window
     private readonly WebView2 _web = new();
     private readonly TaskbarBadge _badge;
     private readonly IntPtr _hwnd;
+    private readonly FileSystemWatcher? _profilesWatcher;
+    private string _name;
+    private int _unread;
 
     public WhatsAppWindow(Profile profile, LauncherPaths paths)
     {
         _profile = profile;
         _paths = paths;
-        Title = "WhatsApp - " + profile.Name;
+        _name = profile.Name;
+        Title = WhatsAppWeb.WindowTitle(_name, _unread);
         Content = _web;
 
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -47,7 +51,60 @@ public sealed class WhatsAppWindow : Window
         Program.WhatsAppActivated += OnHandedOff;
         Closed += (_, _) => Program.WhatsAppActivated -= OnHandedOff;
 
+        // A rename in the launcher (another process) only changes profiles.json; follow it so the
+        // title and taskbar button show the new name without reopening the window
+        _profilesWatcher = WatchProfiles();
+        Closed += (_, _) => _profilesWatcher?.Dispose();
+
         _ = InitAsync();
+    }
+
+    private FileSystemWatcher? WatchProfiles()
+    {
+        var folder = Path.GetDirectoryName(_paths.ProfilesFile);
+        if (folder is null || !Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        var file = Path.GetFileName(_paths.ProfilesFile);
+        var watcher = new FileSystemWatcher(folder)
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+        };
+
+        // ProfileStore.Save writes a temp file and moves it over profiles.json: a rename event
+        void OnEvent(object? sender, FileSystemEventArgs e)
+        {
+            if (string.Equals(e.Name, file, StringComparison.OrdinalIgnoreCase))
+            {
+                DispatcherQueue.TryEnqueue(ReloadName);
+            }
+        }
+
+        watcher.Changed += OnEvent;
+        watcher.Created += OnEvent;
+        watcher.Renamed += OnEvent;
+        watcher.EnableRaisingEvents = true;
+        return watcher;
+    }
+
+    private void ReloadName()
+    {
+        try
+        {
+            var current = new ProfileStore(_paths.ProfilesFile).Load()
+                .FirstOrDefault(p => p.Slug == _profile.Slug && p.App == ProfileApp.WhatsApp);
+            if (current is not null && current.Name != _name)
+            {
+                _name = current.Name;
+                Title = WhatsAppWeb.WindowTitle(_name, _unread);
+            }
+        }
+        catch (Exception ex) when (ex is ProfileStoreException or IOException or UnauthorizedAccessException)
+        {
+            // Mid-write or unreadable: keep the current name; the next change event tries again
+        }
     }
 
     private void OnHandedOff() => DispatcherQueue.TryEnqueue(BringToFront);
@@ -91,9 +148,9 @@ public sealed class WhatsAppWindow : Window
 
     private void UpdateUnread(string title)
     {
-        var count = WhatsAppWeb.UnreadCount(title);
-        Title = (count > 0 ? $"({count}) " : string.Empty) + "WhatsApp - " + _profile.Name;
-        _badge.Show(count);
+        _unread = WhatsAppWeb.UnreadCount(title);
+        Title = WhatsAppWeb.WindowTitle(_name, _unread);
+        _badge.Show(_unread);
     }
 
     // FR-W5: the window itself only ever shows WhatsApp Web
